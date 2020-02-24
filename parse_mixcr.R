@@ -5,6 +5,7 @@ suppressMessages(library(tidyr))
 suppressMessages(library(parallel))
 suppressMessages(library(Biostrings))
 
+rename = dplyr::rename
 
 def_alleles <- function(subs, segments, 
                         count_threshold = 5, 
@@ -39,19 +40,19 @@ transform_refpoints = function(data) {
   colnames(splited_refs) = c("cdr3Start", "vEnd", "dStart", "dEnd", "jStart",
                              "cdr1Start", "fr2Start", "cdr2Start", "fr3Start", "fr4Start", "fr4End")
   
-  tmp$cdr3Start = as.integer(tmp$cdr3Start)
-  tmp$vEnd = as.integer(tmp$vEnd)
-  tmp$dStart = as.integer(tmp$dStart)
-  tmp$dEnd = as.integer(tmp$dEnd)
-  tmp$jStart = as.integer(tmp$jStart)
-  tmp$cdr1Start = as.integer(tmp$cdr1Start)
-  tmp$fr2Start = as.integer(tmp$fr2Start)
-  tmp$cdr2Start = as.integer(tmp$cdr2Start)
-  tmp$fr3Start = as.integer(tmp$fr3Start)
-  tmp$fr4Start = as.integer(tmp$fr4Start)
-  tmp$fr4End = as.integer(tmp$fr4End)
+  splited_refs$cdr3Start = as.integer(splited_refs$cdr3Start)
+  splited_refs$vEnd = as.integer(splited_refs$vEnd)
+  splited_refs$dStart = as.integer(splited_refs$dStart)
+  splited_refs$dEnd = as.integer(splited_refs$dEnd)
+  splited_refs$jStart = as.integer(splited_refs$jStart)
+  splited_refs$cdr1Start = as.integer(splited_refs$cdr1Start)
+  splited_refs$fr2Start = as.integer(splited_refs$fr2Start)
+  splited_refs$cdr2Start = as.integer(splited_refs$cdr2Start)
+  splited_refs$fr3Start = as.integer(splited_refs$fr3Start)
+  splited_refs$fr4Start = as.integer(splited_refs$fr4Start)
+  splited_refs$fr4End = as.integer(splited_refs$fr4End)
   
-  data = cbind(as.data.table(data), tmp)
+  data = cbind(as.data.table(data), splited_refs)
   data
 }
 
@@ -122,8 +123,8 @@ read_mutations_detailed <- function(dt.clones){
     merge(segments) %>%
     def_alleles(segments) %>%
     merge(dt.clones %>% 
-            select(sample, cloneId, refPoints)) %>%
-    transform_refpoints()
+            select(sample, cloneId, cdr1Start, fr2Start,
+                   cdr2Start, fr3Start, cdr3Start, fr4Start))
   
   subs$region <- unlist(apply(select(subs, pos.nt, cdr1Start, fr2Start,
                                      cdr2Start, fr3Start, cdr3Start, fr4Start), 1, def_region))
@@ -339,7 +340,6 @@ read_mutations <- function(dt.clones, germline_v_path, germline_j_path, ncores){
            segment = "J")
   
   dt.clones <- dt.clones %>%
-    transform_refpoints %>%
     transform_alignment %>%
     merge(germline.v %>% select(v = segment.name, v.germline = segment.nt), by="v") %>%
     merge(germline.j %>% select(j = segment.name, j.germline = segment.nt), by="j") %>%
@@ -356,21 +356,26 @@ read_mutations <- function(dt.clones, germline_v_path, germline_j_path, ncores){
               indels = read_indels(dt.clones, ncores = ncores)))
 }
 
-read_mixcr <- function(mixcr_out_folder, germline_v_path = "", germline_j_path = "", ncores = 4){
-  files = list.files(mixcr_out_folder, full.name=T)
+read_mixcr <- function(mixcr_out_folder, out_path, germline_v_path = "", germline_j_path = "", ncores = 4){
+  files = list.files(mixcr_out_folder)
   
-  clones <- lapply(files, function(i) fread(i) %>% mutate(sample = i)) %>%
+  clones <- lapply(files, function(i) fread(paste0(mixcr_out_folder, '/', i)) %>% mutate(sample = i)) %>%
     rbindlist() %>%
     mutate(v = str_split_fixed(allVHitsWithScore, "\\*", 2)[,1],
            j = str_split_fixed(allJHitsWithScore, "\\*", 2)[,1], 
            donor = sample) %>% # ! should be changed if any donor is represented by multiple samples
-    ungroup
+    ungroup %>%
+    transform_refpoints
   
   if (sum(str_detect(colnames(clones), "mutationsDetailed")) > 0){
     muts <- read_mutations_detailed(clones)
   } else {
     muts <- read_mutations(clones, germline_v_path, germline_j_path, ncores=ncores)
   }
+  
+  saveRDS(clones, paste0(out_path, '/clones.Rds'))
+  saveRDS(muts[["subs"]], paste0(out_path, '/substitutions.Rds'))
+  saveRDS(muts[["indels"]], paste0(out_path, '/indels.Rds'))
   
   return(list(clones = clones, subs = muts[["subs"]], indels = muts[["indels"]]))
 }
